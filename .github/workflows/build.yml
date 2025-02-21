@@ -113,14 +113,10 @@ jobs:
       run: |
         if [ -n "$LOCALVERSION" ]; then
           curl -F document=@"kernel-$KERNEL_VERSION$LOCALVERSION-$BUILD_TIME.zip" \
-               -F caption="Kernel Build Success! Version: $KERNEL_VERSION$LOCALVERSION, Build Time: $BUILD_TIME
-   ✅ Completed in $((SECONDS / 60)) minute(s) and $((SECONDS % 60)) second(s)! 🚀
-   Latest commit: $HASH" \
+               -F caption="Kernel Build Success! Version: $KERNEL_VERSION$LOCALVERSION, Build Time: $BUILD_TIME✅ Completed in $((SECONDS / 60)) minute(s) and $((SECONDS % 60)) second(s)! Latest commit: $HASH" \
                https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendDocument?chat_id=${{ secrets.TELEGRAM_CHAT_ID }}
         else
           curl -F document=@"kernel-$KERNEL_VERSION-$BUILD_TIME.zip" \
-               -F caption="Kernel Build Success! Version: $KERNEL_VERSION, Build Time: $BUILD_TIME
-   ✅ Completed in $((SECONDS / 60)) minute(s) and $((SECONDS % 60)) second(s)! 🚀
-   Latest commit: $HASH" \
+               -F caption="Kernel Build Success! Version: $KERNEL_VERSION, Build Time: $BUILD_TIME ✅ Completed in $((SECONDS / 60)) minute(s) and $((SECONDS % 60)) second(s)! Latest commit: $HASH" \
                https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendDocument?chat_id=${{ secrets.TELEGRAM_CHAT_ID }}
         fi
