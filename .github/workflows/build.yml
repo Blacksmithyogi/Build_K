@@ -54,8 +54,13 @@ jobs:
           git clone --recurse-submodules $KERNEL_URL -b $KERNEL_BRANCH $KERNEL_DIR
         else
           git clone $KERNEL_URL -b $KERNEL_BRANCH $KERNEL_DIR
-        fi
-
+        fi    
+    - name: Clean directory
+      run: |
+        cd $KERNEL_DIR
+        make 0=out clean
+        make O=out mproper
+    
     - name: Build kernel
       run: |
         SECONDS=0  # Start timing the build
