@@ -62,11 +62,6 @@ jobs:
         cd $KERNEL_DIR
         export ARCH=$ARCH
         make O=out ${KERNEL_NAME}_defconfig
-
-        # Extract LOCALVERSION from .config
-        LOCALVERSION=$(grep -Po '(?<=CONFIG_LOCALVERSION=")[^"]*' out/.config || echo "")
-        echo "LOCALVERSION=$LOCALVERSION" >> $GITHUB_ENV
-
         make -j$(nproc --all) O=out EXTRAVERSION="" CC=clang \
           CROSS_COMPILE=aarch64-linux-gnu- \
           CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
@@ -89,19 +84,13 @@ jobs:
         git clone https://github.com/Blacksmithyogi/AnyKernel3.git -b Smirnoff
         cp output/* AnyKernel3/
         cd AnyKernel3
-
-        # Include LOCALVERSION in the ZIP file name (if it exists)
-        if [ -n "$LOCALVERSION" ]; then
-          zip -r9 ../kernel-$KERNEL_VERSION$LOCALVERSION-$BUILD_TIME.zip * -x .git README.md *placeholder
-        else
-          zip -r9 ../kernel-$KERNEL_VERSION-$BUILD_TIME.zip * -x .git README.md *placeholder
-        fi
+        zip -r9 ../kernel-$KERNEL_VERSION-$BUILD_TIME.zip * -x .git README.md *placeholder
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: Kernel-$KERNEL_VERSION$LOCALVERSION
-        path: kernel-$KERNEL_VERSION$LOCALVERSION-$BUILD_TIME.zip
+        name: Kernel-$KERNEL_VERSION
+        path: kernel-$KERNEL_VERSION-$BUILD_TIME.zip
 
     - name: Get latest commit hash
       id: get_hash
@@ -111,12 +100,6 @@ jobs:
 
     - name: Upload to Telegram
       run: |
-        if [ -n "$LOCALVERSION" ]; then
-          curl -F document=@"kernel-$KERNEL_VERSION$LOCALVERSION-$BUILD_TIME.zip" \
-               -F caption="Kernel Build Success! Version: $KERNEL_VERSION$LOCALVERSION, Build Time: $BUILD_TIME✅ Completed in $((SECONDS / 60)) minute(s) and $((SECONDS % 60)) second(s)! Latest commit: $HASH" \
-               https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendDocument?chat_id=${{ secrets.TELEGRAM_CHAT_ID }}
-        else
           curl -F document=@"kernel-$KERNEL_VERSION-$BUILD_TIME.zip" \
-               -F caption="Kernel Build Success! Version: $KERNEL_VERSION, Build Time: $BUILD_TIME ✅ Completed in $((SECONDS / 60)) minute(s) and $((SECONDS % 60)) second(s)! Latest commit: $HASH" \
+               -F caption="Kernel Build Success! Version: $KERNEL_VERSION-$KERNEL_NAME, Build Time: $BUILD_TIME✅ Completed in $((SECONDS / 60)) minute(s) and $((SECONDS % 60)) second(s)! Latest commit: $HASH" \
                https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendDocument?chat_id=${{ secrets.TELEGRAM_CHAT_ID }}
-        fi
