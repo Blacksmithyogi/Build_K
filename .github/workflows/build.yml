@@ -37,6 +37,7 @@ jobs:
       KERNEL_BRANCH: ${{ github.event.inputs.kernel_branch }}
       RECURSE_SUBMODULE: ${{ github.event.inputs.recurse_submodule }}
       IS_RELEASE: ${{ github.event.inputs.is_release }}
+      KERNEL_TYPE: "HyperOS"  # Add KERNEL_TYPE here
 
     steps:
     - name: Checkout repository
@@ -50,18 +51,26 @@ jobs:
 
     - name: Clone kernel source
       run: |
-        if [ "$RECURSE_SUBMODULE" = "true" ]; then
-          git clone --recurse-submodules $KERNEL_URL -b $KERNEL_BRANCH $KERNEL_DIR
+        if [ "${{ env.RECURSE_SUBMODULE }}" = "true" ]; then
+          git clone --recurse-submodules ${{ env.KERNEL_URL }} -b ${{ env.KERNEL_BRANCH }} ${{ env.KERNEL_DIR }}
         else
-          git clone $KERNEL_URL -b $KERNEL_BRANCH $KERNEL_DIR
-        fi   
-        
+          git clone ${{ env.KERNEL_URL }} -b ${{ env.KERNEL_BRANCH }} ${{ env.KERNEL_DIR }}
+        fi
+
+    - name: Clean build directory
+      run: |
+        cd ${{ env.KERNEL_DIR }}
+        make O=out clean
+        make O=out mrproper
+
     - name: Build kernel
       run: |
-        SECONDS=0  # Start timing the build
-        cd $KERNEL_DIR
-        export ARCH=$ARCH
-        make O=out ${KERNEL_NAME}_defconfig
+        cd ${{ env.KERNEL_DIR }}
+        export ARCH=${{ env.ARCH }}
+        make O=out ${{ env.KERNEL_NAME }}_defconfig
+
+        # Override EXTRAVERSION and LOCALVERSION
+        echo "CONFIG_LOCALVERSION=" >> out/.config
         make -j$(nproc --all) O=out EXTRAVERSION="" CC=clang \
           CROSS_COMPILE=aarch64-linux-gnu- \
           CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
@@ -69,7 +78,7 @@ jobs:
 
         # Save build time and kernel version
         BUILD_TIME=$(date '+%Y%m%d-%H%M%S')
-        KERNEL_VERSION=$(make kernelversion)
+        KERNEL_VERSION=$(make O=out kernelversion)
         echo "BUILD_TIME=$BUILD_TIME" >> $GITHUB_ENV
         echo "KERNEL_VERSION=$KERNEL_VERSION" >> $GITHUB_ENV
 
@@ -79,27 +88,54 @@ jobs:
         cp out/arch/arm64/boot/dtb.img $GITHUB_WORKSPACE/output/
         cp out/arch/arm64/boot/dtbo.img $GITHUB_WORKSPACE/output/
 
+    - name: Verify kernel version
+      run: |
+        cd ${{ env.KERNEL_DIR }}
+        echo "Kernel version: $(make O=out kernelversion)"
+        echo "Kernel release: $(make O=out kernelrelease)"
+
     - name: Package kernel (AnyKernel3)
       run: |
         git clone https://github.com/Blacksmithyogi/AnyKernel3.git -b Smirnoff
         cp output/* AnyKernel3/
         cd AnyKernel3
-        zip -r9 ../kernel-$KERNEL_VERSION-$BUILD_TIME.zip * -x .git README.md *placeholder
+
+        # Use KERNEL_TYPE in the ZIP file name
+        zip -r9 ../${{ env.KERNEL_TYPE }}-${{ env.KERNEL_BRANCH }}-${{ env.KERNEL_VERSION }}-${{ env.KERNEL_NAME }}-${{ env.BUILD_TIME }}.zip * -x .git README.md *placeholder
+        cd ${GITHUB_WORKSPACE}
+
+    - name: List files after packaging
+      run: ls -l
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: Kernel-$KERNEL_VERSION
-        path: kernel-$KERNEL_VERSION-$BUILD_TIME.zip
+        name: ${{ env.KERNEL_TYPE }}-${{ env.KERNEL_VERSION }}-${{ env.KERNEL_BRANCH }}-${{ env.KERNEL_NAME }}
+        path: ${{ env.KERNEL_TYPE }}-*.zip
 
     - name: Get latest commit hash
       id: get_hash
       run: |
-        HASH=$(git -C $KERNEL_DIR rev-parse --short HEAD)
+        HASH=$(git -C ${{ env.KERNEL_DIR }} rev-parse --short HEAD)
         echo "HASH=$HASH" >> $GITHUB_ENV
+
+    - name: Create release
+      if: ${{ env.IS_RELEASE == 'true' }}
+      uses: softprops/action-gh-release@v2
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        tag_name: v${{ env.KERNEL_VERSION }}
+        name: "Kernel Version ${{ env.KERNEL_VERSION }}"
+        body: '${{ env.KERNEL_VERSION }}-${{ env.KERNEL_TYPE }}-${{ env.KERNEL_BRANCH }} for ${{ env.KERNEL_NAME }}'
+        draft: false
+        prerelease: false
+        generate_release_notes: false
+        files: ${{ env.KERNEL_TYPE }}*.zip    
 
     - name: Upload to Telegram
       run: |
-          curl -F document=@"kernel-$KERNEL_VERSION-$BUILD_TIME.zip" \
-               -F caption="Kernel Build Success! Version: $KERNEL_VERSION-$KERNEL_NAME, Build Time: $BUILD_TIME✅ Completed in $((SECONDS / 60)) minute(s) and $((SECONDS % 60)) second(s)! Latest commit: $HASH" \
-               https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendDocument?chat_id=${{ secrets.TELEGRAM_CHAT_ID }}
+        curl -F document=@"${{ env.KERNEL_TYPE }}-${{ env.KERNEL_BRANCH }}-${{ env.KERNEL_VERSION }}-${{ env.KERNEL_NAME }}-${{ env.BUILD_TIME }}.zip" \
+             -F caption="Kernel Build Success! Version: ${{ env.KERNEL_VERSION }}, Build Time: ${{ env.BUILD_TIME }}
+             ✅ Completed in $((SECONDS / 60)) minute(s) and $((SECONDS % 60)) second(s)! 
+             Latest commit: ${{ env.HASH }}" \
+             https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendDocument?chat_id=${{ secrets.TELEGRAM_CHAT_ID }}
