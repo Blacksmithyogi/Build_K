@@ -56,37 +56,29 @@ jobs:
         else
           git clone ${{ env.KERNEL_URL }} -b ${{ env.KERNEL_BRANCH }} ${{ env.KERNEL_DIR }}
         fi
-
-    - name: Clean build directory
-      run: |
-        cd ${{ env.KERNEL_DIR }}
-        make O=out clean
-        make O=out mrproper
-
+        
     - name: Build kernel
       run: |
         cd ${{ env.KERNEL_DIR }}
         export ARCH=${{ env.ARCH }}
         make O=out ${{ env.KERNEL_NAME }}_defconfig
-
-        # Override EXTRAVERSION and LOCALVERSION
-        echo "CONFIG_LOCALVERSION=" >> out/.config
         make -j$(nproc --all) O=out EXTRAVERSION="" CC=clang \
           CROSS_COMPILE=aarch64-linux-gnu- \
           CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
           CONFIG_NO_ERROR_ON_MISMATCH=y
 
-        # Save build time and kernel version
+        
         BUILD_TIME=$(date '+%Y%m%d-%H%M%S')
-        KERNEL_VERSION=$(make O=out kernelversion)
         echo "BUILD_TIME=$BUILD_TIME" >> $GITHUB_ENV
+        
+        KERNEL_VERSION=$(make kernelversion)
         echo "KERNEL_VERSION=$KERNEL_VERSION" >> $GITHUB_ENV
 
-        # Copy kernel artifacts
-        mkdir -p $GITHUB_WORKSPACE/output
-        cp out/arch/arm64/boot/Image.gz $GITHUB_WORKSPACE/output/
-        cp out/arch/arm64/boot/dtb.img $GITHUB_WORKSPACE/output/
-        cp out/arch/arm64/boot/dtbo.img $GITHUB_WORKSPACE/output/
+        mkdir ${GITHUB_WORKSPACE}/output
+        cp out/arch/arm64/boot/Image.gz ${GITHUB_WORKSPACE}/output/
+        cp out/arch/arm64/boot/dtb.img ${GITHUB_WORKSPACE}/output/
+        cp out/arch/arm64/boot/dtbo.img ${GITHUB_WORKSPACE}/output/
+        cd ${GITHUB_WORKSPACE}
 
     - name: Verify kernel version
       run: |
@@ -101,7 +93,7 @@ jobs:
         cd AnyKernel3
 
         # Use KERNEL_TYPE in the ZIP file name
-        zip -r9 ../${{ env.KERNEL_TYPE }}-${{ env.KERNEL_BRANCH }}-${{ env.KERNEL_VERSION }}-${{ env.KERNEL_NAME }}-${{ env.BUILD_TIME }}.zip * -x .git README.md *placeholder
+        zip -r9 ../${{ env.KERNEL_TYPE }}-${{ env.KERNEL_BRANCH }}-${{ env.KERNEL_VERSION }}-${{ env.KERNEL_NAME }}-$BUILD_TIME.zip * -x .git README.md *placeholder
         cd ${GITHUB_WORKSPACE}
 
     - name: List files after packaging
@@ -134,8 +126,8 @@ jobs:
 
     - name: Upload to Telegram
       run: |
-        curl -F document=@"${{ env.KERNEL_TYPE }}-${{ env.KERNEL_BRANCH }}-${{ env.KERNEL_VERSION }}-${{ env.KERNEL_NAME }}-${{ env.BUILD_TIME }}.zip" \
-             -F caption="Kernel Build Success! Version: ${{ env.KERNEL_VERSION }}, Build Time: ${{ env.BUILD_TIME }}
+        curl -F document=@"${{ env.KERNEL_TYPE }}-${{ env.KERNEL_BRANCH }}-${{ env.KERNEL_VERSION }}-${{ env.KERNEL_NAME }}-$env.BUILD_TIME.zip" \
+             -F caption="Kernel Build Success! Version: ${{ env.KERNEL_VERSION }}, Build Time: $BUILD_TIME
              ✅ Completed in $((SECONDS / 60)) minute(s) and $((SECONDS % 60)) second(s)! 
              Latest commit: ${{ env.HASH }}" \
              https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendDocument?chat_id=${{ secrets.TELEGRAM_CHAT_ID }}
