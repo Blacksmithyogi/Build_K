@@ -7,18 +7,22 @@ on:
         description: 'Kernel GitHub URL'
         required: true
         default: 'https://github.com/Blacksmithyogi/kernel_xiaomi_courbet.git'
+        type: string
       kernel_branch:
         description: 'Kernel branch'
         required: true
         default: 'A15'
+        type: string
       recurse_submodule:
         description: 'Clone submodules (true/false)'
         required: true
         default: 'false'
+        type: boolean
       is_release:
         description: 'Create GitHub release (true/false)'
         required: true
         default: 'false'
+        type: boolean
 
 jobs:
   Build-Kernel:
