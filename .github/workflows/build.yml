@@ -1,4 +1,34 @@
-    - name: Build kernel
+    name: Build kernel
+
+    on:
+  workflow_dispatch:
+    inputs:
+      kernel_url:
+        description: 'Kernel github url perf-kernel: https://github.com/ask9027/kernel_xiaomi_courbet.git, alfakernel: https://github.com/ask9027/kernel_xiaomi_sm6150.git'
+        required: true
+        default: 'https://github.com/Blacksmithyogi/kernel_xiaomi_courbet.git'
+        type: string
+      kernel_branch:
+        description: "github branch like 'perf-ksu-miui'"
+        required: true
+        default: 'A15'
+        type: string
+      kernel_type:
+        description: 'HyperOS'
+        required: true
+        default: 'HyperOS'
+        type: string
+      recurse_submodule:
+        description: "some kernel source use submodule(true/false)"
+        required: true
+        default: false
+        type: boolean
+      is_release:
+        description: 'Kernel Release at github true or false'
+        required: true
+        default: false
+        type: boolean
+    
       run: |
         SECONDS=0
         cd ${{ env.KERNEL_DIR }}
