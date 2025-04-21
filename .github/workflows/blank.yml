@@ -1,36 +1,182 @@
-# This is a basic workflow to help you get started with Actions
+name: Build Kernel
 
-name: CI
-
-# Controls when the workflow will run
 on:
-  # Triggers the workflow on push or pull request events but only for the "main" branch
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
-
-  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
+    inputs:
+      kernel_url:
+        description: 'Kernel GitHub URL'
+        required: true
+        default: 'https://github.com/Blacksmithyogi/kernel_xiaomi_courbet.git'
+        type: string
+      kernel_branch:
+        description: 'Kernel branch'
+        required: true
+        default: 'A15'
+        type: string
+      recurse_submodule:
+        description: 'Clone submodules (true/false)'
+        required: true
+        default: 'false'
+        type: boolean
+      is_release:
+        description: 'Create GitHub release (true/false)'
+        required: true
+        default: 'false'
+        type: boolean
 
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
-  # This workflow contains a single job called "build"
-  build:
-    # The type of runner that the job will run on
-    runs-on: ubuntu-latest
+  Build-Kernel:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      KERNEL_NAME: "courbet"
+      KERNEL_DIR: "courbet-kernel"
+      ARCH: "arm64"
+      KERNEL_URL: ${{ github.event.inputs.kernel_url }}
+      KERNEL_BRANCH: ${{ github.event.inputs.kernel_branch }}
+      RECURSE_SUBMODULE: ${{ github.event.inputs.recurse_submodule }}
+      IS_RELEASE: ${{ github.event.inputs.is_release }}
+      KERNEL_TYPE: "HyperOS"
 
-    # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v4
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-      # Runs a single command using the runners shell
-      - name: Run a one-line script
-        run: echo Hello, world!
+    - name: Install dependencies
+      run: |
+        sudo apt update && sudo apt install -y \
+          git bc bison flex libssl-dev make automake build-essential \
+          curl zip clang lld gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
 
-      # Runs a set of commands using the runners shell
-      - name: Run a multi-line script
-        run: |
-          echo Add other actions to build,
-          echo test, and deploy your project.
+    - name: Clone kernel source
+      run: |
+        if [ "${{ env.RECURSE_SUBMODULE }}" = "true" ]; then
+          git clone --recurse-submodules ${{ env.KERNEL_URL }} -b ${{ env.KERNEL_BRANCH }} ${{ env.KERNEL_DIR }}
+        else
+          git clone ${{ env.KERNEL_URL }} -b ${{ env.KERNEL_BRANCH }} ${{ env.KERNEL_DIR }}
+        fi
+
+    - name: Clean build directory
+      run: |
+        cd ${{ env.KERNEL_DIR }}
+        make O=out clean
+        make O=out mrproper
+
+    - name: Build kernel
+      run: |
+        SECONDS=0
+        cd ${{ env.KERNEL_DIR }}
+        export ARCH=${{ env.ARCH }}
+        make O=out ${{ env.KERNEL_NAME }}_defconfig
+
+        echo "CONFIG_LOCALVERSION=\"-mycustomversion\"" >> out/.config
+
+        make -j$(nproc --all) O=out EXTRAVERSION="" CC=clang \
+          CROSS_COMPILE=aarch64-linux-gnu- \
+          CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+          CONFIG_NO_ERROR_ON_MISMATCH=y
+
+       BUILD_TIME=$(date -u '+%Y%m%d-%H%M%S')  # Using UTC for consistency
+
+      # Get raw kernel version
+      RAW_VERSION=$(make O=out kernelversion 2>/dev/null || echo "unknown_version")
+      
+      # Sanitize version for different use cases:
+      # 1. For filenames (strict)
+      FILENAME_VERSION=$(echo "$RAW_VERSION" | sed 's/[^a-zA-Z0-9._-]/_/g')
+      # 2. For display (keep most characters)
+      DISPLAY_VERSION=$(echo "$RAW_VERSION" | sed 's/[^a-zA-Z0-9._-+]/ /g')
+      
+      # Set environment variables
+      {
+        echo "BUILD_TIME=${BUILD_TIME}"
+        echo "RAW_KERNEL_VERSION=${RAW_VERSION}"
+        echo "SANITIZED_VERSION=${FILENAME_VERSION}" 
+        echo "DISPLAY_VERSION=${DISPLAY_VERSION}"
+        echo "KERNEL_VERSION=${FILENAME_VERSION}"  # Backwards compatibility
+      } >> $GITHUB_ENV
+      
+      # Debug output
+      echo "Build Time: ${BUILD_TIME}"
+      echo "Raw Version: ${RAW_VERSION}"
+      echo "Sanitized (Filename-safe): ${FILENAME_VERSION}"
+      echo "Display Version: ${DISPLAY_VERSION}"
+
+        ELAPSED_TIME="$((SECONDS / 60)) minute(s) and $((SECONDS % 60)) second(s)"
+        echo "ELAPSED_TIME=$ELAPSED_TIME" >> $GITHUB_ENV
+
+        mkdir ${GITHUB_WORKSPACE}/output
+        cp out/arch/arm64/boot/Image.gz ${GITHUB_WORKSPACE}/output/
+        cp out/arch/arm64/boot/dtb.img ${GITHUB_WORKSPACE}/output/
+        cp out/arch/arm64/boot/dtbo.img ${GITHUB_WORKSPACE}/output/
+        cd ${GITHUB_WORKSPACE}
+
+   - name: Create AnyKernel3 zip
+    run: |
+      # Clone AnyKernel3 with error handling
+      if ! git clone --depth=1 https://github.com/Blacksmithyogi/AnyKernel3 -b Smirnoff; then
+        echo "::error::Failed to clone AnyKernel3 repository"
+        exit 1
+      fi
+      
+      # Verify files exist before copying
+      echo "Contents of output directory:"
+      ls -la ${GITHUB_WORKSPACE}/output/
+      
+      if [ ! -f ${GITHUB_WORKSPACE}/output/Image.gz ]; then
+        echo "::error::Image.gz not found in output directory"
+        exit 1
+      fi
+      
+      # Copy files with verification
+      cp -v ${GITHUB_WORKSPACE}/output/* AnyKernel3/ || {
+        echo "::error::Failed to copy kernel files to AnyKernel3"
+        exit 1
+      }
+      
+      # Create zip with proper exclusion
+      cd AnyKernel3
+      ZIP_NAME="${KERNEL_TYPE}-${KERNEL_BRANCH}-${SANITIZED_VERSION}-${KERNEL_NAME}-${BUILD_TIME}.zip"
+      echo "Creating zip: ${ZIP_NAME}"
+      
+      if ! zip -r9 ../${ZIP_NAME} * -x .git README.md *placeholder; then
+        echo "::error::Failed to create zip file"
+        exit 1
+      fi
+      
+      # Verify zip was created
+      cd ..
+      if [ ! -f "${ZIP_NAME}" ]; then
+        echo "::error::Zip file was not created"
+        exit 1
+      fi
+      
+      echo "Zip created successfully:"
+      ls -lh ${ZIP_NAME}
+      
+      # Store ZIP_NAME in environment
+      echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
+
+  
+    - name: List files after packaging
+      run: ls -l
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ env.KERNEL_TYPE }}-${{ env.KERNEL_VERSION }}-${{ env.KERNEL_BRANCH }}-${{ env.KERNEL_NAME }}
+        path: ${{ env.KERNEL_TYPE }}-*.zip
+
+    - name: Get latest commit hash
+      id: get_hash
+      run: |
+        HASH=$(git -C ${{ env.KERNEL_DIR }} rev-parse --short HEAD)
+        echo "HASH=$HASH" >> $GITHUB_ENV
+
+    - name: Upload to Telegram
+      run: |
+        curl -F document=@"${{ env.KERNEL_TYPE }}-${{ env.KERNEL_BRANCH }}-${{ env.KERNEL_VERSION }}-${{ env.KERNEL_NAME }}-$BUILD_TIME.zip" \
+             -F caption="Kernel Build Success! Version: ${{ env.KERNEL_VERSION }}, Build Time: $BUILD_TIME
+             ✅ Completed in ${{ env.ELAPSED_TIME }}! 🚀 Latest commit: ${{ env.HASH }}" \
+             https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendDocument?chat_id=${{ secrets.TELEGRAM_CHAT_ID }}
