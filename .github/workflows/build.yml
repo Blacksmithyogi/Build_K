@@ -77,7 +77,7 @@ jobs:
           BUILD_TIME=$(date -u '+%Y%m%d-%H%M%S')
 
           RAW_VERSION=$(make O=out kernelversion 2>/dev/null || echo "unknown_version")
-          FILENAME_VERSION=$(echo "$RAW_VERSION" | sed 's/[^a-zA-Z0-9._-]/_/g')
+          FILENAME_VERSION=$(echo "$RAW_VERSION" | sed 's/[^-a-zA-Z0-9._]/_/g')
           DISPLAY_VERSION=$(echo "$RAW_VERSION" | sed 's/[^a-zA-Z0-9._+ -]/ /g')
 
           {
