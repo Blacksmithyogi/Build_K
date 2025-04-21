@@ -85,8 +85,6 @@ jobs:
         ELAPSED_TIME="$((SECONDS / 60)) minute(s) and $((SECONDS % 60)) second(s)"
         echo "ELAPSED_TIME=$ELAPSED_TIME" >> $GITHUB_ENV
 
-    - name: Copy kernel output files
-      run: |
         mkdir ${GITHUB_WORKSPACE}/output
         cp out/arch/arm64/boot/Image.gz ${GITHUB_WORKSPACE}/output/
         cp out/arch/arm64/boot/dtb.img ${GITHUB_WORKSPACE}/output/
@@ -95,7 +93,7 @@ jobs:
 
     - name: Create AnyKernel3 zip
       run: |
-        git clone https://github.com/ask9027/AnyKernel3.git -b ${KERNEL_TYPE,,}
+        git clone https://github.com/Blacksmithyogi/AnyKernel3 -b Smirnoff
         cp ${GITHUB_WORKSPACE}/output/* AnyKernel3/
         cd AnyKernel3
 
