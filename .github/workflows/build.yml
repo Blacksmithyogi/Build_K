@@ -1,126 +1,155 @@
-    name: Build kernel
+name: Build Kernel
 
-    on:
+on:
   workflow_dispatch:
     inputs:
       kernel_url:
-        description: 'Kernel github url perf-kernel: https://github.com/ask9027/kernel_xiaomi_courbet.git, alfakernel: https://github.com/ask9027/kernel_xiaomi_sm6150.git'
+        description: 'Kernel GitHub URL'
         required: true
         default: 'https://github.com/Blacksmithyogi/kernel_xiaomi_courbet.git'
-        type: string
       kernel_branch:
-        description: "github branch like 'perf-ksu-miui'"
+        description: 'Kernel branch'
         required: true
         default: 'A15'
-        type: string
-      kernel_type:
-        description: 'HyperOS'
-        required: true
-        default: 'HyperOS'
-        type: string
       recurse_submodule:
-        description: "some kernel source use submodule(true/false)"
+        description: 'Clone submodules (true/false)'
         required: true
-        default: false
-        type: boolean
+        default: 'false'
       is_release:
-        description: 'Kernel Release at github true or false'
+        description: 'Create GitHub release (true/false)'
         required: true
-        default: false
-        type: boolean
-    
-      run: |
-        SECONDS=0
-        cd ${{ env.KERNEL_DIR }}
-        export ARCH=${{ env.ARCH }}
-        make O=out ${{ env.KERNEL_NAME }}_defconfig
+        default: 'false'
 
-        echo "CONFIG_LOCALVERSION=\"-mycustomversion\"" >> out/.config
+jobs:
+  Build-Kernel:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
 
-        make -j$(nproc --all) O=out EXTRAVERSION="" CC=clang \
-          CROSS_COMPILE=aarch64-linux-gnu- \
-          CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-          CONFIG_NO_ERROR_ON_MISMATCH=y
+    env:
+      KERNEL_NAME: "courbet"
+      KERNEL_DIR: "courbet-kernel"
+      ARCH: "arm64"
+      KERNEL_URL: ${{ github.event.inputs.kernel_url }}
+      KERNEL_BRANCH: ${{ github.event.inputs.kernel_branch }}
+      RECURSE_SUBMODULE: ${{ github.event.inputs.recurse_submodule }}
+      IS_RELEASE: ${{ github.event.inputs.is_release }}
+      KERNEL_TYPE: "HyperOS"
 
-        BUILD_TIME=$(date -u '+%Y%m%d-%H%M%S')
-        RAW_VERSION=$(make O=out kernelversion 2>/dev/null || echo "unknown_version")
-        FILENAME_VERSION=$(echo "$RAW_VERSION" | sed 's/[^a-zA-Z0-9._-]/_/g')
-        DISPLAY_VERSION=$(echo "$RAW_VERSION" | sed 's/[^a-zA-Z0-9._-+]/ /g')
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-        {
-          echo "BUILD_TIME=${BUILD_TIME}"
-          echo "RAW_KERNEL_VERSION=${RAW_VERSION}"
-          echo "SANITIZED_VERSION=${FILENAME_VERSION}" 
-          echo "DISPLAY_VERSION=${DISPLAY_VERSION}"
-          echo "KERNEL_VERSION=${FILENAME_VERSION}"
-        } >> $GITHUB_ENV
+      - name: Install dependencies
+        run: |
+          sudo apt update && sudo apt install -y \
+            git bc bison flex libssl-dev make automake build-essential \
+            curl zip clang lld gcc-aarch64-linux-gnu gcc-arm-linux-gnueabi
 
-        ELAPSED_TIME="$((SECONDS / 60)) minute(s) and $((SECONDS % 60)) second(s)"
-        echo "ELAPSED_TIME=$ELAPSED_TIME" >> $GITHUB_ENV
+      - name: Clone kernel source
+        run: |
+          if [ "${{ env.RECURSE_SUBMODULE }}" = "true" ]; then
+            git clone --recurse-submodules ${{ env.KERNEL_URL }} -b ${{ env.KERNEL_BRANCH }} ${{ env.KERNEL_DIR }}
+          else
+            git clone ${{ env.KERNEL_URL }} -b ${{ env.KERNEL_BRANCH }} ${{ env.KERNEL_DIR }}
+          fi
 
-        mkdir ${GITHUB_WORKSPACE}/output
-        cp out/arch/arm64/boot/Image.gz ${GITHUB_WORKSPACE}/output/
-        cp out/arch/arm64/boot/dtb.img ${GITHUB_WORKSPACE}/output/
-        cp out/arch/arm64/boot/dtbo.img ${GITHUB_WORKSPACE}/output/
-        cd ${GITHUB_WORKSPACE}
+      - name: Clean build directory
+        run: |
+          cd ${{ env.KERNEL_DIR }}
+          make O=out clean
+          make O=out mrproper
 
-    - name: Create AnyKernel3 zip
-      run: |
-        if ! git clone --depth=1 https://github.com/Blacksmithyogi/AnyKernel3 -b Smirnoff; then
-          echo "::error::Failed to clone AnyKernel3 repository"
-          exit 1
-        fi
-        
-        echo "Contents of output directory:"
-        ls -la ${GITHUB_WORKSPACE}/output/
-        
-        if [ ! -f ${GITHUB_WORKSPACE}/output/Image.gz ]; then
-          echo "::error::Image.gz not found in output directory"
-          exit 1
-        fi
-        
-        cp -v ${GITHUB_WORKSPACE}/output/* AnyKernel3/ || {
-          echo "::error::Failed to copy kernel files to AnyKernel3"
-          exit 1
-        }
-        
-        cd AnyKernel3
-        ZIP_NAME="${{ env.KERNEL_TYPE }}-${{ env.KERNEL_BRANCH }}-${{ env.SANITIZED_VERSION }}-${{ env.KERNEL_NAME }}-${{ env.BUILD_TIME }}.zip"
-        echo "Creating zip: ${ZIP_NAME}"
-        
-        if ! zip -r9 ../${ZIP_NAME} * -x .git README.md *placeholder; then
-          echo "::error::Failed to create zip file"
-          exit 1
-        fi
-        
-        cd ..
-        if [ ! -f "${ZIP_NAME}" ]; then
-          echo "::error::Zip file was not created"
-          exit 1
-        fi
-        
-        echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
-        ls -lh ${ZIP_NAME}
+      - name: Build kernel
+        run: |
+          SECONDS=0
+          cd ${{ env.KERNEL_DIR }}
+          export ARCH=${{ env.ARCH }}
+          make O=out ${{ env.KERNEL_NAME }}_defconfig
 
-  
-    - name: List files after packaging
-      run: ls -l
+          echo "CONFIG_LOCALVERSION=\"-mycustomversion\"" >> out/.config
 
-       - name: Upload artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: ${{ env.KERNEL_TYPE }}-${{ env.SANITIZED_VERSION }}-${{ env.KERNEL_BRANCH }}
-        path: ${{ env.ZIP_NAME }}
+          make -j$(nproc --all) O=out EXTRAVERSION="" CC=clang \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            CONFIG_NO_ERROR_ON_MISMATCH=y
 
-    - name: Get latest commit hash
-      id: get_hash
-      run: |
-        HASH=$(git -C ${{ env.KERNEL_DIR }} rev-parse --short HEAD)
-        echo "HASH=$HASH" >> $GITHUB_ENV
+          BUILD_TIME=$(date -u '+%Y%m%d-%H%M%S')
 
-        - name: Upload to Telegram
-      run: |
-        curl -F document=@"${{ env.ZIP_NAME }}" \
-             -F caption="Kernel Build Success! Version: ${{ env.DISPLAY_VERSION }}, Build Time: ${{ env.BUILD_TIME }}
-             ✅ Completed in ${{ env.ELAPSED_TIME }}! 🚀 Latest commit: ${{ env.HASH }}" \
-             "https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendDocument?chat_id=${{ secrets.TELEGRAM_CHAT_ID }}"
+          RAW_VERSION=$(make O=out kernelversion 2>/dev/null || echo "unknown_version")
+          FILENAME_VERSION=$(echo "$RAW_VERSION" | sed 's/[^a-zA-Z0-9._-]/_/g')
+          DISPLAY_VERSION=$(echo "$RAW_VERSION" | sed 's/[^a-zA-Z0-9._-+]/ /g')
+
+          {
+            echo "BUILD_TIME=${BUILD_TIME}"
+            echo "RAW_KERNEL_VERSION=${RAW_VERSION}"
+            echo "SANITIZED_VERSION=${FILENAME_VERSION}"
+            echo "DISPLAY_VERSION=${DISPLAY_VERSION}"
+            echo "KERNEL_VERSION=${FILENAME_VERSION}"
+          } >> $GITHUB_ENV
+
+          ELAPSED_TIME="$((SECONDS / 60)) minute(s) and $((SECONDS % 60)) second(s)"
+          echo "ELAPSED_TIME=$ELAPSED_TIME" >> $GITHUB_ENV
+
+          mkdir ${GITHUB_WORKSPACE}/output
+          cp out/arch/arm64/boot/Image.gz ${GITHUB_WORKSPACE}/output/
+          cp out/arch/arm64/boot/dtb.img ${GITHUB_WORKSPACE}/output/
+          cp out/arch/arm64/boot/dtbo.img ${GITHUB_WORKSPACE}/output/
+
+      - name: Create AnyKernel3 zip
+        run: |
+          if ! git clone --depth=1 https://github.com/Blacksmithyogi/AnyKernel3 -b Smirnoff; then
+            echo "::error::Failed to clone AnyKernel3 repository"
+            exit 1
+          fi
+
+          echo "Contents of output directory:"
+          ls -la ${GITHUB_WORKSPACE}/output/
+
+          if [ ! -f ${GITHUB_WORKSPACE}/output/Image.gz ]; then
+            echo "::error::Image.gz not found in output directory"
+            exit 1
+          fi
+
+          cp -v ${GITHUB_WORKSPACE}/output/* AnyKernel3/ || {
+            echo "::error::Failed to copy kernel files to AnyKernel3"
+            exit 1
+          }
+
+          cd AnyKernel3
+          ZIP_NAME="${KERNEL_TYPE}-${KERNEL_BRANCH}-${SANITIZED_VERSION}-${KERNEL_NAME}-${BUILD_TIME}.zip"
+          echo "Creating zip: ${ZIP_NAME}"
+
+          if ! zip -r9 ../${ZIP_NAME} * -x .git README.md *placeholder; then
+            echo "::error::Failed to create zip file"
+            exit 1
+          fi
+
+          cd ..
+          if [ ! -f "${ZIP_NAME}" ]; then
+            echo "::error::Zip file was not created"
+            exit 1
+          fi
+
+          echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
+
+      - name: List files after packaging
+        run: ls -l
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.KERNEL_TYPE }}-${{ env.KERNEL_VERSION }}-${{ env.KERNEL_BRANCH }}-${{ env.KERNEL_NAME }}
+          path: ${{ env.KERNEL_TYPE }}-*.zip
+
+      - name: Get latest commit hash
+        id: get_hash
+        run: |
+          HASH=$(git -C ${{ env.KERNEL_DIR }} rev-parse --short HEAD)
+          echo "HASH=$HASH" >> $GITHUB_ENV
+
+      - name: Upload to Telegram
+        run: |
+          curl -F document=@"${{ env.KERNEL_TYPE }}-${{ env.KERNEL_BRANCH }}-${{ env.KERNEL_VERSION }}-${{ env.KERNEL_NAME }}-$BUILD_TIME.zip" \
+               -F caption="✅ Kernel Build Success!\n🔧 Version: ${{ env.KERNEL_VERSION }}\n🕒 Built at: $BUILD_TIME\n⏱ Duration: ${{ env.ELAPSED_TIME }}\n🔨 Commit: ${{ env.HASH }}" \
+               https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendDocument?chat_id=${{ secrets.TELEGRAM_CHAT_ID }}
