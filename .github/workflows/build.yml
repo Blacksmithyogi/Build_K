@@ -108,7 +108,7 @@ jobs:
           }
 
           cd AnyKernel3
-          ZIP_NAME="${KERNEL_TYPE}-${KERNEL_BRANCH}-${SANITIZED_VERSION}-${KERNEL_NAME}-${BUILD_TIME}.zip"
+          ZIP_NAME="${KERNEL_TYPE}-${KERNEL_BRANCH}-${KERNEL_NAME}-${BUILD_TIME}.zip"
           echo "Creating zip: ${ZIP_NAME}"
 
           if ! zip -r9 ../${ZIP_NAME} * -x .git README.md *placeholder; then
@@ -141,6 +141,6 @@ jobs:
 
       - name: Upload to Telegram
         run: |
-          curl -F document=@"${{ env.KERNEL_TYPE }}-${{ env.KERNEL_BRANCH }}-${{ env.KERNEL_VERSION }}-${{ env.KERNEL_NAME }}-$BUILD_TIME.zip" \
+          curl -F document=@"$ZIP_NAME" \
                -F caption="✅ Kernel Build Success!\n🔧 Version: ${{ env.KERNEL_VERSION }}\n🕒 Built at: $BUILD_TIME\n⏱ Duration: ${{ env.ELAPSED_TIME }}\n🔨 Commit: ${{ env.HASH }}" \
                https://api.telegram.org/bot${{ secrets.TELEGRAM_TOKEN }}/sendDocument?chat_id=${{ secrets.TELEGRAM_CHAT_ID }}
