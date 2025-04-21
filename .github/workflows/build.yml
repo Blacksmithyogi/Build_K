@@ -77,10 +77,31 @@ jobs:
           CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
           CONFIG_NO_ERROR_ON_MISMATCH=y
 
-        BUILD_TIME=$(date '+%Y%m%d-%H%M%S')
-        KERNEL_VERSION=$(make O=out kernelversion)
-        echo "BUILD_TIME=$BUILD_TIME" >> $GITHUB_ENV
-        echo "KERNEL_VERSION=$KERNEL_VERSION" >> $GITHUB_ENV
+       BUILD_TIME=$(date -u '+%Y%m%d-%H%M%S')  # Using UTC for consistency
+
+      # Get raw kernel version
+      RAW_VERSION=$(make O=out kernelversion 2>/dev/null || echo "unknown_version")
+      
+      # Sanitize version for different use cases:
+      # 1. For filenames (strict)
+      FILENAME_VERSION=$(echo "$RAW_VERSION" | sed 's/[^a-zA-Z0-9._-]/_/g')
+      # 2. For display (keep most characters)
+      DISPLAY_VERSION=$(echo "$RAW_VERSION" | sed 's/[^a-zA-Z0-9._-+]/ /g')
+      
+      # Set environment variables
+      {
+        echo "BUILD_TIME=${BUILD_TIME}"
+        echo "RAW_KERNEL_VERSION=${RAW_VERSION}"
+        echo "SANITIZED_VERSION=${FILENAME_VERSION}" 
+        echo "DISPLAY_VERSION=${DISPLAY_VERSION}"
+        echo "KERNEL_VERSION=${FILENAME_VERSION}"  # Backwards compatibility
+      } >> $GITHUB_ENV
+      
+      # Debug output
+      echo "Build Time: ${BUILD_TIME}"
+      echo "Raw Version: ${RAW_VERSION}"
+      echo "Sanitized (Filename-safe): ${FILENAME_VERSION}"
+      echo "Display Version: ${DISPLAY_VERSION}"
 
         ELAPSED_TIME="$((SECONDS / 60)) minute(s) and $((SECONDS % 60)) second(s)"
         echo "ELAPSED_TIME=$ELAPSED_TIME" >> $GITHUB_ENV
@@ -91,14 +112,53 @@ jobs:
         cp out/arch/arm64/boot/dtbo.img ${GITHUB_WORKSPACE}/output/
         cd ${GITHUB_WORKSPACE}
 
-    - name: Create AnyKernel3 zip
-      run: |
-        git clone https://github.com/Blacksmithyogi/AnyKernel3 -b Smirnoff
-        cp ${GITHUB_WORKSPACE}/output/* AnyKernel3/
-        cd AnyKernel3
+   - name: Create AnyKernel3 zip
+    run: |
+      # Clone AnyKernel3 with error handling
+      if ! git clone --depth=1 https://github.com/Blacksmithyogi/AnyKernel3 -b Smirnoff; then
+        echo "::error::Failed to clone AnyKernel3 repository"
+        exit 1
+      fi
+      
+      # Verify files exist before copying
+      echo "Contents of output directory:"
+      ls -la ${GITHUB_WORKSPACE}/output/
+      
+      if [ ! -f ${GITHUB_WORKSPACE}/output/Image.gz ]; then
+        echo "::error::Image.gz not found in output directory"
+        exit 1
+      fi
+      
+      # Copy files with verification
+      cp -v ${GITHUB_WORKSPACE}/output/* AnyKernel3/ || {
+        echo "::error::Failed to copy kernel files to AnyKernel3"
+        exit 1
+      }
+      
+      # Create zip with proper exclusion
+      cd AnyKernel3
+      ZIP_NAME="${KERNEL_TYPE}-${KERNEL_BRANCH}-${SANITIZED_VERSION}-${KERNEL_NAME}-${BUILD_TIME}.zip"
+      echo "Creating zip: ${ZIP_NAME}"
+      
+      if ! zip -r9 ../${ZIP_NAME} * -x .git README.md *placeholder; then
+        echo "::error::Failed to create zip file"
+        exit 1
+      fi
+      
+      # Verify zip was created
+      cd ..
+      if [ ! -f "${ZIP_NAME}" ]; then
+        echo "::error::Zip file was not created"
+        exit 1
+      fi
+      
+      echo "Zip created successfully:"
+      ls -lh ${ZIP_NAME}
+      
+      # Store ZIP_NAME in environment
+      echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_ENV
 
-        zip -r9 ../${{ env.KERNEL_TYPE }}-${{ env.KERNEL_BRANCH }}-${{ env.KERNEL_VERSION }}-${{ env.KERNEL_NAME }}-$BUILD_TIME.zip * -x .git README.md *placeholder
-
+  
     - name: List files after packaging
       run: ls -l
 
