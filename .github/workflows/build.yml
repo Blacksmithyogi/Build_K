@@ -22,11 +22,12 @@ on:
 
 jobs:
   Build-Kernel:
+    strategy:
+      fail-fast: false
     runs-on: ubuntu-24.04
     permissions:
       contents: write
-
-   env:
+    env:
       KERNEL_NAME: "courbet"
       KERNEL_DIR: "courbet-kernel"
       ARCH: "arm64"
